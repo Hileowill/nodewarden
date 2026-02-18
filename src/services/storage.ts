@@ -471,26 +471,32 @@ export class StorageService {
     const grouped = new Map<string, Attachment[]>();
     if (cipherIds.length === 0) return grouped;
 
-    const placeholders = cipherIds.map(() => '?').join(',');
-    const res = await this.db
-      .prepare(`SELECT id, cipher_id, file_name, size, size_name, key FROM attachments WHERE cipher_id IN (${placeholders})`)
-      .bind(...cipherIds)
-      .all<any>();
+    const uniqueCipherIds = [...new Set(cipherIds)];
+    const chunkSize = LIMITS.performance.bulkMoveChunkSize;
 
-    for (const row of (res.results || [])) {
-      const item: Attachment = {
-        id: row.id,
-        cipherId: row.cipher_id,
-        fileName: row.file_name,
-        size: row.size,
-        sizeName: row.size_name,
-        key: row.key,
-      };
-      const list = grouped.get(item.cipherId);
-      if (list) {
-        list.push(item);
-      } else {
-        grouped.set(item.cipherId, [item]);
+    for (let i = 0; i < uniqueCipherIds.length; i += chunkSize) {
+      const chunk = uniqueCipherIds.slice(i, i + chunkSize);
+      const placeholders = chunk.map(() => '?').join(',');
+      const res = await this.db
+        .prepare(`SELECT id, cipher_id, file_name, size, size_name, key FROM attachments WHERE cipher_id IN (${placeholders})`)
+        .bind(...chunk)
+        .all<any>();
+
+      for (const row of (res.results || [])) {
+        const item: Attachment = {
+          id: row.id,
+          cipherId: row.cipher_id,
+          fileName: row.file_name,
+          size: row.size,
+          sizeName: row.size_name,
+          key: row.key,
+        };
+        const list = grouped.get(item.cipherId);
+        if (list) {
+          list.push(item);
+        } else {
+          grouped.set(item.cipherId, [item]);
+        }
       }
     }
 
