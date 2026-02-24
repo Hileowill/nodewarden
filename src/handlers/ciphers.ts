@@ -5,6 +5,16 @@ import { generateUUID } from '../utils/uuid';
 import { deleteAllAttachmentsForCipher } from './attachments';
 import { parsePagination, encodeContinuationToken } from '../utils/pagination';
 
+function getAliasedProp(source: any, aliases: string[]): { present: boolean; value: any } {
+  if (!source || typeof source !== 'object') return { present: false, value: undefined };
+  for (const key of aliases) {
+    if (Object.prototype.hasOwnProperty.call(source, key)) {
+      return { present: true, value: source[key] };
+    }
+  }
+  return { present: false, value: undefined };
+}
+
 // Android 2026.2.0 expects fido2Credentials[].counter to be a string.
 export function normalizeCipherLoginForCompatibility(login: any): any {
   if (!login || typeof login !== 'object') return login ?? null;
@@ -165,6 +175,8 @@ export async function handleCreateCipher(request: Request, env: Env, userId: str
     deletedAt: null,
   };
   cipher.login = normalizeCipherLoginForCompatibility(cipher.login);
+  const createFields = getAliasedProp(cipherData, ['fields', 'Fields']);
+  cipher.fields = createFields.present ? (createFields.value ?? null) : (cipher.fields ?? null);
 
   await storage.saveCipher(cipher);
   await storage.updateRevisionDate(userId);
@@ -208,6 +220,17 @@ export async function handleUpdateCipher(request: Request, env: Env, userId: str
     deletedAt: existingCipher.deletedAt,
   };
   cipher.login = normalizeCipherLoginForCompatibility(cipher.login);
+
+  // Custom fields deletion compatibility:
+  // - Accept both camelCase "fields" and PascalCase "Fields".
+  // - For full update (PUT/POST on this endpoint), missing fields means cleared fields.
+  //   This prevents stale custom fields from being resurrected by merge fallback.
+  const incomingFields = getAliasedProp(cipherData, ['fields', 'Fields']);
+  if (incomingFields.present) {
+    cipher.fields = incomingFields.value ?? null;
+  } else if (request.method === 'PUT' || request.method === 'POST') {
+    cipher.fields = null;
+  }
 
   await storage.saveCipher(cipher);
   await storage.updateRevisionDate(userId);
