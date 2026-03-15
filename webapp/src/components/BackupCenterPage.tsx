@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import ConfirmDialog from '@/components/ConfirmDialog';
 import {
+  type AdminBackupImportResponse,
   type AdminBackupRunResponse,
   type AdminBackupSettings,
   type BackupDestinationRecord,
@@ -30,15 +31,25 @@ import { BackupOperationsSidebar } from './backup-center/BackupOperationsSidebar
 interface BackupCenterPageProps {
   currentUserId: string | null;
   onExport: () => Promise<void>;
-  onImport: (file: File, replaceExisting?: boolean) => Promise<void>;
+  onImport: (file: File, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
   onLoadSettings: () => Promise<AdminBackupSettings>;
   onSaveSettings: (settings: AdminBackupSettings) => Promise<AdminBackupSettings>;
   onRunRemoteBackup: (destinationId?: string | null) => Promise<AdminBackupRunResponse>;
   onListRemoteBackups: (destinationId: string, path: string) => Promise<RemoteBackupBrowserResponse>;
   onDownloadRemoteBackup: (destinationId: string, path: string, onProgress?: (percent: number | null) => void) => Promise<void>;
   onDeleteRemoteBackup: (destinationId: string, path: string) => Promise<void>;
-  onRestoreRemoteBackup: (destinationId: string, path: string, replaceExisting?: boolean) => Promise<void>;
-  onNotify: (type: 'success' | 'error', text: string) => void;
+  onRestoreRemoteBackup: (destinationId: string, path: string, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
+  onNotify: (type: 'success' | 'error' | 'warning', text: string) => void;
+}
+
+function buildSkippedImportMessage(result: AdminBackupImportResponse): string | null {
+  const skipped = result.skipped;
+  if (!skipped || (!skipped.attachments && !skipped.sendFiles)) return null;
+  return t('txt_backup_restore_skipped_summary', {
+    reason: skipped.reason || t('txt_backup_restore_skipped_reason_default'),
+    attachments: String(skipped.attachments),
+    sendFiles: String(skipped.sendFiles),
+  });
 }
 
 export default function BackupCenterPage(props: BackupCenterPageProps) {
@@ -286,8 +297,10 @@ export default function BackupCenterPage(props: BackupCenterPageProps) {
     setLocalError('');
     setImporting(true);
     try {
-      await props.onImport(selectedFile, replaceExisting);
+      const result = await props.onImport(selectedFile, replaceExisting);
       props.onNotify('success', t('txt_backup_restore_success_relogin'));
+      const skippedMessage = buildSkippedImportMessage(result);
+      if (skippedMessage) props.onNotify('warning', skippedMessage);
       resetSelectedFile();
       setConfirmLocalRestoreOpen(false);
       setConfirmReplaceOpen(false);
@@ -406,10 +419,12 @@ export default function BackupCenterPage(props: BackupCenterPageProps) {
     setRestoringRemotePath(path);
     setLocalError('');
     try {
-      await props.onRestoreRemoteBackup(savedSelectedDestination.id, path, replaceExisting);
+      const result = await props.onRestoreRemoteBackup(savedSelectedDestination.id, path, replaceExisting);
       setConfirmRemoteReplaceOpen(false);
       setPendingRemoteRestorePath('');
       props.onNotify('success', t('txt_backup_restore_success_relogin'));
+      const skippedMessage = buildSkippedImportMessage(result);
+      if (skippedMessage) props.onNotify('warning', skippedMessage);
     } catch (error) {
       if (!replaceExisting && isReplaceRequiredError(error)) {
         setPendingRemoteRestorePath(path);

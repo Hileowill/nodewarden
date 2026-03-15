@@ -2,7 +2,7 @@ import { lazy, Suspense } from 'preact/compat';
 import { Link, Route, Switch } from 'wouter';
 import { ArrowUpDown, Cloud, LogOut, Settings as SettingsIcon, Shield, ShieldUser } from 'lucide-preact';
 import type { ImportAttachmentFile, ImportResultSummary } from '@/components/ImportPage';
-import type { AdminBackupRunResponse, AdminBackupSettings, RemoteBackupBrowserResponse } from '@/lib/api/backup';
+import type { AdminBackupImportResponse, AdminBackupRunResponse, AdminBackupSettings, RemoteBackupBrowserResponse } from '@/lib/api/backup';
 import type { CiphersImportPayload } from '@/lib/api/vault';
 import { t } from '@/lib/i18n';
 import type { AdminInvite, AdminUser, AuthorizedDevice, Cipher, Folder as VaultFolder, Profile, Send, SendDraft, SessionState, VaultDraft } from '@/lib/types';
@@ -88,14 +88,14 @@ export interface AppMainRoutesProps {
   onDeleteUser: (userId: string) => Promise<void>;
   onRevokeInvite: (code: string) => Promise<void>;
   onExportBackup: () => Promise<void>;
-  onImportBackup: (file: File, replaceExisting?: boolean) => Promise<void>;
+  onImportBackup: (file: File, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
   onLoadBackupSettings: () => Promise<AdminBackupSettings>;
   onSaveBackupSettings: (settings: AdminBackupSettings) => Promise<AdminBackupSettings>;
   onRunRemoteBackup: (destinationId?: string | null) => Promise<AdminBackupRunResponse>;
   onListRemoteBackups: (destinationId: string, path: string) => Promise<RemoteBackupBrowserResponse>;
   onDownloadRemoteBackup: (destinationId: string, path: string, onProgress?: (percent: number | null) => void) => Promise<void>;
   onDeleteRemoteBackup: (destinationId: string, path: string) => Promise<void>;
-  onRestoreRemoteBackup: (destinationId: string, path: string, replaceExisting?: boolean) => Promise<void>;
+  onRestoreRemoteBackup: (destinationId: string, path: string, replaceExisting?: boolean) => Promise<AdminBackupImportResponse>;
 }
 
 export default function AppMainRoutes(props: AppMainRoutesProps) {

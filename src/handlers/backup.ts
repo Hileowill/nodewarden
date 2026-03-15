@@ -153,6 +153,9 @@ async function runImportAndAudit(
     ciphers: imported.result.imported.ciphers,
     attachments: imported.result.imported.attachmentFiles,
     sendFiles: imported.result.imported.sendFiles,
+    skippedAttachments: imported.result.skipped.attachments,
+    skippedSendFiles: imported.result.skipped.sendFiles,
+    skippedReason: imported.result.skipped.reason,
     replaceExisting,
     ...metadata,
   });

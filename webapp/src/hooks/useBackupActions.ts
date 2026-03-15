@@ -30,8 +30,9 @@ export default function useBackupActions(options: UseBackupActionsOptions) {
       },
 
       async importBackup(file: File, replaceExisting: boolean = false) {
-        await importAdminBackup(authedFetch, file, replaceExisting);
+        const result = await importAdminBackup(authedFetch, file, replaceExisting);
         onImported?.();
+        return result;
       },
 
       async loadSettings() {
@@ -60,8 +61,9 @@ export default function useBackupActions(options: UseBackupActionsOptions) {
       },
 
       async restoreRemoteBackup(destinationId: string, path: string, replaceExisting: boolean = false) {
-        await restoreRemoteBackup(authedFetch, destinationId, path, replaceExisting);
+        const result = await restoreRemoteBackup(authedFetch, destinationId, path, replaceExisting);
         onRestored?.();
+        return result;
       },
     }),
     [authedFetch, onImported, onRestored]

@@ -19,6 +19,16 @@ export interface BackupImportResultBody {
     attachmentFiles: number;
     sendFiles: number;
   };
+  skipped: {
+    reason: string | null;
+    attachments: number;
+    sendFiles: number;
+    items: Array<{
+      kind: 'attachment' | 'send-file';
+      path: string;
+      sizeBytes: number;
+    }>;
+  };
 }
 
 export interface BackupImportExecutionResult {
@@ -106,19 +116,99 @@ function collectImportedBlobKeys(db: BackupPayload['db']): Set<string> {
   return keys;
 }
 
-function validateImportBlobLimits(env: Env, payload: BackupPayload, files: Record<string, Uint8Array>): void {
-  if (getBlobStorageKind(env) !== 'kv') return;
+const KV_BLOB_SKIP_REASON = 'Cloudflare KV object size limit (25 MB)';
+
+interface BackupImportSkipSummary {
+  reason: string | null;
+  attachments: number;
+  sendFiles: number;
+  items: Array<{
+    kind: 'attachment' | 'send-file';
+    path: string;
+    sizeBytes: number;
+  }>;
+}
+
+interface PreparedBackupImportPayload {
+  payload: BackupPayload;
+  skipped: BackupImportSkipSummary;
+}
+
+function prepareImportPayloadForTarget(env: Env, payload: BackupPayload, files: Record<string, Uint8Array>): PreparedBackupImportPayload {
+  if (getBlobStorageKind(env) !== 'kv') {
+    return {
+      payload,
+      skipped: {
+        reason: null,
+        attachments: 0,
+        sendFiles: 0,
+        items: [],
+      },
+    };
+  }
+
+  const oversizedAttachmentPaths = new Set<string>();
+  const oversizedSendPaths = new Set<string>();
+  const skippedItems: BackupImportSkipSummary['items'] = [];
+
   for (const entry of Object.keys(files)) {
     if (!entry.endsWith('.bin')) continue;
-    if (files[entry].byteLength > KV_MAX_OBJECT_BYTES) {
-      throw new Error(`Backup file ${entry} exceeds the Cloudflare KV object size limit`);
+    const sizeBytes = files[entry].byteLength;
+    if (sizeBytes <= KV_MAX_OBJECT_BYTES) continue;
+    if (entry.startsWith('attachments/')) {
+      oversizedAttachmentPaths.add(entry);
+      skippedItems.push({ kind: 'attachment', path: entry, sizeBytes });
+      continue;
+    }
+    if (entry.startsWith('send-files/')) {
+      oversizedSendPaths.add(entry);
+      skippedItems.push({ kind: 'send-file', path: entry, sizeBytes });
     }
   }
-  if ((payload.db.attachments || []).length > 0 || (payload.db.sends || []).length > 0) {
-    if (!env.ATTACHMENTS_KV) {
-      throw new Error('Backup restore requires ATTACHMENTS_KV when using KV blob storage');
-    }
+
+  const nextAttachments = (payload.db.attachments || []).filter((row) => {
+    const cipherId = String(row.cipher_id || '').trim();
+    const attachmentId = String(row.id || '').trim();
+    if (!cipherId || !attachmentId) return false;
+    return !oversizedAttachmentPaths.has(`attachments/${cipherId}/${attachmentId}.bin`);
+  });
+
+  const nextSends = (payload.db.sends || []).filter((row) => {
+    const sendId = String(row.id || '').trim();
+    const fileId = parseSendFileId(typeof row.data === 'string' ? row.data : null);
+    if (!sendId || !fileId) return true;
+    return !oversizedSendPaths.has(`send-files/${sendId}/${fileId}.bin`);
+  });
+
+  const nextPayload: BackupPayload = {
+    ...payload,
+    db: {
+      ...payload.db,
+      attachments: nextAttachments,
+      sends: nextSends,
+    },
+  };
+
+  const needsKvBlobStorage = nextAttachments.length > 0
+    || nextSends.some((row) => {
+      const sendId = String(row.id || '').trim();
+      const fileId = parseSendFileId(typeof row.data === 'string' ? row.data : null);
+      return !!sendId && !!fileId;
+    });
+
+  if (needsKvBlobStorage && !env.ATTACHMENTS_KV) {
+    throw new Error('Backup restore requires ATTACHMENTS_KV when using KV blob storage');
   }
+
+  return {
+    payload: nextPayload,
+    skipped: {
+      reason: skippedItems.length ? KV_BLOB_SKIP_REASON : null,
+      attachments: skippedItems.filter((item) => item.kind === 'attachment').length,
+      sendFiles: skippedItems.filter((item) => item.kind === 'send-file').length,
+      items: skippedItems,
+    },
+  };
 }
 
 function buildInsertStatements(db: D1Database, table: string, columns: string[], rows: SqlRow[], upsert = false): D1PreparedStatement[] {
@@ -211,7 +301,7 @@ export async function importBackupArchiveBytes(
   const storage = new StorageService(env.DB);
   const parsed = parseBackupArchive(archiveBytes);
   validateBackupPayloadContents(parsed.payload, parsed.files);
-  validateImportBlobLimits(env, parsed.payload, parsed.files);
+  const prepared = prepareImportPayloadForTarget(env, parsed.payload, parsed.files);
 
   try {
     await ensureImportTargetIsFresh(env.DB);
@@ -222,7 +312,7 @@ export async function importBackupArchiveBytes(
   }
 
   const previousBlobKeys = replaceExisting ? await collectCurrentBlobKeys(env.DB) : new Set<string>();
-  const { db } = parsed.payload;
+  const { db } = prepared.payload;
   await importBackupRows(env.DB, db);
   await normalizeImportedBackupSettings(storage, env, 'UTC');
 
@@ -248,6 +338,7 @@ export async function importBackupArchiveBytes(
         attachmentFiles: blobCounts.attachments,
         sendFiles: blobCounts.sendFiles,
       },
+      skipped: prepared.skipped,
     },
   };
 }

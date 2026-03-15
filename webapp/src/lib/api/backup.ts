@@ -86,9 +86,23 @@ export interface AdminBackupImportCounts {
   sendFiles: number;
 }
 
+export interface AdminBackupImportSkippedItem {
+  kind: 'attachment' | 'send-file';
+  path: string;
+  sizeBytes: number;
+}
+
+export interface AdminBackupImportSkipped {
+  reason: string | null;
+  attachments: number;
+  sendFiles: number;
+  items: AdminBackupImportSkippedItem[];
+}
+
 export interface AdminBackupImportResponse {
   object: 'instance-backup-import';
   imported: AdminBackupImportCounts;
+  skipped: AdminBackupImportSkipped;
 }
 
 export interface AdminBackupExportPayload {
